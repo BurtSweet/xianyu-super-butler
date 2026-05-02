@@ -14,15 +14,16 @@ import {
   updateAccountLoginInfo,
   updateAccountAISettings,
   getAllAISettings,
-  getAccountAISettings
+  getAccountAISettings,
+  addAccountByCookie,
 } from '../services/api';
 import {
   Plus, Power, Edit2, Trash2, QrCode, X, Check, Loader2,
   MessageSquare, RefreshCw, Save, User, Clock, MessageCircle,
-  Upload, Key, Eye, EyeOff, Bot, Settings
+  Upload, Key, Eye, EyeOff, Bot, Settings, ClipboardPaste, AlertCircle
 } from 'lucide-react';
 
-type ModalType = 'edit' | 'ai-settings' | null;
+type ModalType = 'edit' | 'ai-settings' | 'cookie-login' | null;
 
 const AccountList: React.FC = () => {
   const [accounts, setAccounts] = useState<AccountDetail[]>([]);
@@ -54,6 +55,9 @@ const AccountList: React.FC = () => {
     custom_prompts: '',
   });
   const [saving, setSaving] = useState(false);
+
+  // Cookie 登录表单
+  const [cookieForm, setCookieForm] = useState({ id: '', value: '', error: '' });
 
   const loadAccounts = async () => {
     setLoading(true);
@@ -204,6 +208,34 @@ const AccountList: React.FC = () => {
     }
   };
 
+  const openCookieLogin = () => {
+    setCookieForm({ id: '', value: '', error: '' });
+    setActiveModal('cookie-login');
+  };
+
+  const handleSubmitCookieLogin = async () => {
+    const id = cookieForm.id.trim();
+    const value = cookieForm.value.trim();
+    if (!id) {
+      setCookieForm({ ...cookieForm, error: '请输入账号 ID（用于区分不同闲鱼账号，可任意命名，如 main、shop1）' });
+      return;
+    }
+    if (!value || value.length < 30) {
+      setCookieForm({ ...cookieForm, error: '请输入完整的闲鱼 Cookie 字符串（一般包含 _m_h5_tk、cookie2 等字段）' });
+      return;
+    }
+    setSaving(true);
+    try {
+      await addAccountByCookie(id, value);
+      setActiveModal(null);
+      await loadAccounts();
+    } catch (err: any) {
+      setCookieForm({ ...cookieForm, error: err?.response?.data?.detail || '添加失败，请检查 Cookie 是否有效' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const startQRLogin = async () => {
     setShowQRModal(true);
     setQrStatus('loading');
@@ -242,13 +274,23 @@ const AccountList: React.FC = () => {
           <h2 className="text-4xl font-extrabold text-gray-900 tracking-tight">账号管理</h2>
           <p className="text-gray-500 mt-2 font-medium">管理您的闲鱼授权账号及设置。</p>
         </div>
-        <button
-            onClick={startQRLogin}
-            className="ios-btn-primary flex items-center gap-2 px-6 py-3 rounded-2xl font-bold shadow-lg shadow-yellow-200 transition-transform hover:scale-105 active:scale-95"
-        >
-          <QrCode className="w-5 h-5" />
-          扫码添加新账号
-        </button>
+        <div className="flex gap-3">
+          <button
+              onClick={openCookieLogin}
+              className="flex items-center gap-2 px-5 py-3 rounded-2xl font-bold bg-white text-gray-800 border border-gray-200 hover:border-gray-300 hover:bg-gray-50 transition-all"
+              title="粘贴 Cookie 添加账号（推荐：扫码失败 / 海外无法收验证码时）"
+          >
+            <ClipboardPaste className="w-5 h-5" />
+            粘贴 Cookie 添加
+          </button>
+          <button
+              onClick={startQRLogin}
+              className="ios-btn-primary flex items-center gap-2 px-6 py-3 rounded-2xl font-bold shadow-lg shadow-yellow-200 transition-transform hover:scale-105 active:scale-95"
+          >
+            <QrCode className="w-5 h-5" />
+            扫码添加新账号
+          </button>
+        </div>
       </div>
 
       {/* Account Grid */}
@@ -324,10 +366,89 @@ const AccountList: React.FC = () => {
                     <User className="w-10 h-10 text-gray-400" />
                 </div>
                 <h3 className="text-lg font-bold text-gray-900">暂无账号</h3>
-                <p className="text-gray-500 mt-1">请点击右上角扫码添加您的闲鱼账号</p>
+                <p className="text-gray-500 mt-1">两种方式任选其一来添加你的闲鱼账号</p>
+                <div className="flex justify-center gap-3 mt-6">
+                  <button onClick={openCookieLogin} className="px-5 py-2.5 rounded-xl bg-white border border-gray-200 hover:bg-gray-50 font-bold text-sm flex items-center gap-2">
+                    <ClipboardPaste className="w-4 h-4" /> 粘贴 Cookie
+                  </button>
+                  <button onClick={startQRLogin} className="px-5 py-2.5 rounded-xl ios-btn-primary font-bold text-sm flex items-center gap-2">
+                    <QrCode className="w-4 h-4" /> 扫码登录
+                  </button>
+                </div>
             </div>
         )}
       </div>
+
+      {/* Cookie 登录弹窗 */}
+      {activeModal === 'cookie-login' && createPortal(
+        <div className="modal-overlay-centered">
+          <div className="modal-container" style={{ maxWidth: '560px' }}>
+            <div className="modal-header">
+              <div>
+                <h3 className="text-2xl font-extrabold text-gray-900">粘贴 Cookie 添加账号</h3>
+                <p className="text-sm text-gray-500 mt-1">扫码失败、海外接收不到验证码时的最稳妥方式</p>
+              </div>
+              <button
+                onClick={() => setActiveModal(null)}
+                className="p-2 rounded-xl hover:bg-gray-100 transition-colors flex-shrink-0"
+              >
+                <X className="w-5 h-5 text-gray-500" />
+              </button>
+            </div>
+            <div className="modal-body space-y-5">
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-sm text-amber-800 flex gap-3">
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                <div>
+                  在浏览器登录闲鱼网页版后，按 F12 打开开发者工具 → Network → 任意请求 → Headers → 复制 <code className="px-1 py-0.5 bg-white rounded">Cookie</code> 的全部内容，粘贴到下方。
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">账号 ID（用于内部标识，可任意命名）</label>
+                <input
+                  type="text"
+                  value={cookieForm.id}
+                  onChange={(e) => setCookieForm({ ...cookieForm, id: e.target.value, error: '' })}
+                  placeholder="例如：main / shop1"
+                  className="w-full ios-input px-4 py-3 rounded-xl"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-gray-700 mb-2">Cookie</label>
+                <textarea
+                  value={cookieForm.value}
+                  onChange={(e) => setCookieForm({ ...cookieForm, value: e.target.value, error: '' })}
+                  placeholder="粘贴完整 Cookie 字符串"
+                  className="w-full ios-input px-4 py-3 rounded-xl h-40 resize-none font-mono text-xs"
+                />
+                <p className="text-xs text-gray-500 mt-1">当前长度：{cookieForm.value.length} 字符</p>
+              </div>
+              {cookieForm.error && (
+                <div className="p-3 rounded-xl bg-red-50 text-red-600 text-sm font-medium">{cookieForm.error}</div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={() => setActiveModal(null)}
+                  className="flex-1 px-6 py-3 rounded-xl font-bold bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                  disabled={saving}
+                >
+                  取消
+                </button>
+                <button
+                  onClick={handleSubmitCookieLogin}
+                  className="flex-1 ios-btn-primary px-6 py-3 rounded-xl font-bold flex items-center justify-center gap-2"
+                  disabled={saving}
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardPaste className="w-4 h-4" />}
+                  {saving ? '提交中...' : '添加账号'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* QR Code Modal */}
       {showQRModal && createPortal(

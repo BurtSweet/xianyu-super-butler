@@ -229,7 +229,15 @@ class AIReplyEngine:
                 max_tokens=max_tokens,
                 temperature=temperature
             )
-            return response.choices[0].message.content.strip()
+            # 部分模型在内容被过滤或仅返回 reasoning 时 content 会是 None，提前规避 strip() 报错
+            content = response.choices[0].message.content if response.choices else None
+            if not content:
+                logger.warning(
+                    f"OpenAI API 返回空内容: model={settings.get('model_name')}, "
+                    f"finish_reason={getattr(response.choices[0], 'finish_reason', 'unknown') if response.choices else 'no_choice'}"
+                )
+                return ""
+            return content.strip()
         except Exception as e:
             logger.error(f"OpenAI API调用失败: {e}")
             # 如果有详细的错误信息，打印出来

@@ -7,6 +7,7 @@ import CardList from './components/CardList';
 import ItemList from './components/ItemList';
 import Settings from './components/Settings';
 import Keywords from './components/Keywords';
+import Onboarding, { shouldShowOnboarding } from './components/Onboarding';
 import { login, verifyToken } from './services/api';
 import { ShieldCheck, ArrowRight, Loader2, Sparkles, User, Lock, KeyRound } from 'lucide-react';
 
@@ -14,6 +15,7 @@ const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [checkingAuth, setCheckingAuth] = useState(true);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
@@ -24,13 +26,16 @@ const App: React.FC = () => {
       const token = localStorage.getItem('auth_token');
       if (token) {
           verifyToken()
-            .then(() => setIsLoggedIn(true))
+            .then(() => {
+              setIsLoggedIn(true);
+              if (shouldShowOnboarding()) setShowOnboarding(true);
+            })
             .catch(() => localStorage.removeItem('auth_token'))
             .finally(() => setCheckingAuth(false));
       } else {
           setCheckingAuth(false);
       }
-      
+
       const handleLogout = () => setIsLoggedIn(false);
       window.addEventListener('auth:logout', handleLogout);
       return () => window.removeEventListener('auth:logout', handleLogout);
@@ -46,6 +51,8 @@ const App: React.FC = () => {
           if (res.success && res.token) {
               localStorage.setItem('auth_token', res.token);
               setIsLoggedIn(true);
+              // 登录成功后总是触发引导/默认密码检查
+              if (shouldShowOnboarding()) setShowOnboarding(true);
           } else {
               setLoginError(res.message || '登录失败');
           }
@@ -185,6 +192,10 @@ const App: React.FC = () => {
             {renderContent()}
         </div>
       </main>
+
+      {showOnboarding && (
+        <Onboarding onClose={() => setShowOnboarding(false)} />
+      )}
     </div>
   );
 };

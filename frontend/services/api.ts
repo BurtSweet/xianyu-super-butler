@@ -22,6 +22,10 @@ export const changePassword = async (currentPassword: string, newPassword: strin
   return post('/change-password', { current_password: currentPassword, new_password: newPassword });
 };
 
+export const checkDefaultPassword = async (): Promise<{ using_default: boolean }> => {
+  return get('/api/check-default-password');
+};
+
 // Accounts
 export const getAccountDetails = async (): Promise<AccountDetail[]> => {
   const data = await get<any[]>('/cookies/details');
@@ -46,6 +50,10 @@ export const getAccountDetails = async (): Promise<AccountDetail[]> => {
 
 export const generateQRLogin = async (): Promise<{ success: boolean; session_id?: string; qr_code_url?: string }> => {
   return post('/qr-login/generate');
+};
+
+export const addAccountByCookie = async (id: string, value: string): Promise<ApiResponse> => {
+  return post('/cookies', { id, value });
 };
 
 export const checkQRLoginStatus = async (sessionId: string): Promise<any> => {

@@ -2936,6 +2936,66 @@ def get_system_settings(_: None = Depends(require_auth)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post('/system-settings/test-email')
+def test_smtp_email(email: str, _: None = Depends(require_auth)):
+    """使用当前 SMTP 配置发送一封测试邮件，方便用户在系统设置页验证配置。"""
+    from db_manager import db_manager
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.header import Header
+
+    if not email or '@' not in email:
+        raise HTTPException(status_code=400, detail='请提供合法的收件人邮箱地址')
+
+    try:
+        smtp_server = (db_manager.get_system_setting('smtp_server') or '').strip()
+        smtp_port_raw = (db_manager.get_system_setting('smtp_port') or '587').strip()
+        smtp_user = (db_manager.get_system_setting('smtp_user') or '').strip()
+        smtp_password = db_manager.get_system_setting('smtp_password') or ''
+        smtp_from = (db_manager.get_system_setting('smtp_from') or smtp_user).strip() or smtp_user
+        smtp_use_ssl = (db_manager.get_system_setting('smtp_use_ssl') or 'false').strip().lower() == 'true'
+        smtp_use_tls = (db_manager.get_system_setting('smtp_use_tls') or 'true').strip().lower() == 'true'
+
+        if not smtp_server or not smtp_user or not smtp_password:
+            raise HTTPException(status_code=400, detail='SMTP 配置不完整，请先填写服务器、账号和密码')
+
+        try:
+            smtp_port = int(smtp_port_raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail='SMTP 端口必须是整数')
+
+        msg = MIMEText('这是一封来自闲鱼智控 Pro 的 SMTP 测试邮件。如收到本邮件，说明 SMTP 配置正确。', 'plain', 'utf-8')
+        msg['Subject'] = Header('闲鱼智控 Pro SMTP 测试', 'utf-8')
+        msg['From'] = smtp_from
+        msg['To'] = email
+
+        if smtp_use_ssl:
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, timeout=15)
+        else:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=15)
+            if smtp_use_tls:
+                server.starttls()
+
+        try:
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, [email], msg.as_string())
+        finally:
+            try:
+                server.quit()
+            except Exception:
+                pass
+
+        return {'success': True, 'message': f'测试邮件已发送至 {email}'}
+    except HTTPException:
+        raise
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(f"SMTP 认证失败: {e}")
+        raise HTTPException(status_code=400, detail=f'SMTP 认证失败：{e.smtp_error.decode("utf-8", errors="ignore") if hasattr(e, "smtp_error") else str(e)}')
+    except Exception as e:
+        logger.error(f"SMTP 测试失败: {e}")
+        raise HTTPException(status_code=500, detail=f'发送测试邮件失败：{str(e)}')
+
+
 @app.put('/system-settings/{key}')
 def update_system_setting(key: str, setting_data: SystemSettingIn, _: None = Depends(require_auth)):
     """更新系统设置"""

@@ -51,9 +51,23 @@ const StatCard: React.FC<{ title: string; value: string | number; icon: React.El
 
 type TimeRange = 'today' | 'yesterday' | '3days' | '7days' | '30days' | 'custom';
 
+const EMPTY_ANALYTICS: OrderAnalytics = {
+  revenue_stats: { total_amount: 0, total_orders: 0 } as any,
+  daily_stats: [],
+  item_stats: [],
+} as any;
+
+const EMPTY_STATS: AdminStats = {
+  active_cookies: 0,
+  total_cookies: 0,
+  total_cards: 0,
+} as any;
+
 const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [analytics, setAnalytics] = useState<OrderAnalytics | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<TimeRange>('7days');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -177,7 +191,17 @@ const Dashboard: React.FC = () => {
       getOrderAnalytics(previousParams).then(setPreviousAnalytics).catch(console.error);
     }
 
-    getOrderAnalytics(params).then(setAnalytics).catch(console.error);
+    getOrderAnalytics(params)
+      .then((data) => {
+        setAnalytics(data || EMPTY_ANALYTICS);
+        setLoadError(null);
+      })
+      .catch((err) => {
+        console.error(err);
+        // 接口失败时给出空状态，避免无限转圈
+        setAnalytics(EMPTY_ANALYTICS);
+        setLoadError('数据加载失败，请检查后端服务或绑定闲鱼账号后再试');
+      });
   };
 
   // 获取上一个时间段的参数
@@ -238,8 +262,8 @@ const Dashboard: React.FC = () => {
   const getTrendPercent = () => {
     if (!analytics || !previousAnalytics) return null;
 
-    const currentAmount = analytics.revenue_stats.total_amount;
-    const previousAmount = previousAnalytics.revenue_stats.total_amount;
+    const currentAmount = analytics.revenue_stats?.total_amount ?? 0;
+    const previousAmount = previousAnalytics.revenue_stats?.total_amount ?? 0;
 
     if (previousAmount === 0) {
       return currentAmount > 0 ? '+100%' : '0%';
@@ -251,18 +275,37 @@ const Dashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    getAdminStats().then(setStats).catch(console.error);
-    loadAnalytics(timeRange);
-    // 获取商品列表
-    getItems().then(items => {
-      setItems(items);
-      // 建立 item_id 到 item_title 的映射
-      const nameMap: Record<string, string> = {};
-      items.forEach(item => {
-        nameMap[item.item_id] = item.item_title || item.item_id;
+    let cancelled = false;
+    setInitialLoading(true);
+    getAdminStats()
+      .then((data) => {
+        if (!cancelled) setStats(data || EMPTY_STATS);
+      })
+      .catch((err) => {
+        console.error(err);
+        if (!cancelled) setStats(EMPTY_STATS);
+      })
+      .finally(() => {
+        if (!cancelled) setInitialLoading(false);
       });
-      setItemNames(nameMap);
-    }).catch(console.error);
+
+    loadAnalytics(timeRange);
+
+    getItems()
+      .then((items) => {
+        if (cancelled) return;
+        setItems(items);
+        const nameMap: Record<string, string> = {};
+        items.forEach((item) => {
+          nameMap[item.item_id] = item.item_title || item.item_id;
+        });
+        setItemNames(nameMap);
+      })
+      .catch(console.error);
+
+    return () => {
+      cancelled = true;
+    };
   }, [timeRange]);
 
   // 加载订单列表
@@ -299,9 +342,21 @@ const Dashboard: React.FC = () => {
     return { startDate, endDate };
   };
 
-  if (!stats || !analytics) return <div className="p-8 flex justify-center text-gray-400"><Activity className="w-8 h-8 animate-spin text-[#FFE815]" /></div>;
+  // 仅在首次拉取且尚未拿到任何数据时短暂显示 loading；
+  // 数据为空（如未绑定闲鱼账号）时进入正常渲染流程，由各 section 自行展示空态。
+  if (initialLoading && !stats && !analytics) {
+    return (
+      <div className="p-8 flex justify-center text-gray-400">
+        <Activity className="w-8 h-8 animate-spin text-[#FFE815]" />
+      </div>
+    );
+  }
 
-  const chartData = analytics.daily_stats?.map(d => ({
+  const safeStats = stats || EMPTY_STATS;
+  const safeAnalytics = analytics || EMPTY_ANALYTICS;
+  const noAccount = (safeStats.total_cookies ?? 0) === 0;
+
+  const chartData = safeAnalytics.daily_stats?.map(d => ({
       name: d.date.slice(5), // MM-DD
       amount: d.amount,
       orders: d.order_count,
@@ -309,9 +364,9 @@ const Dashboard: React.FC = () => {
   })) || [];
 
   // 计算图表数据（在渲染时直接计算）
-  const itemStats = analytics.item_stats || [];
-  const totalOrders = analytics.revenue_stats.total_orders || 0;
-  const totalAmount = analytics.revenue_stats.total_amount || 0;
+  const itemStats = safeAnalytics.item_stats || [];
+  const totalOrders = safeAnalytics.revenue_stats?.total_orders || 0;
+  const totalAmount = safeAnalytics.revenue_stats?.total_amount || 0;
 
   // 1. 商品销量排行：按订单数量排序
   const productSalesData = itemStats.length > 0 ? itemStats
@@ -384,6 +439,20 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {(noAccount || loadError) && (
+        <div className="ios-card rounded-[1.5rem] p-5 flex items-start gap-4 bg-amber-50 border border-amber-200">
+          <AlertCircle className="w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 text-sm">
+            {noAccount && (
+              <div className="font-bold text-amber-800">还未绑定闲鱼账号 — 请前往「账号管理」扫码或粘贴 Cookie 添加账号，数据后才能正常显示。</div>
+            )}
+            {loadError && (
+              <div className="text-amber-700 mt-1">{loadError}</div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Time Range Selector */}
       <div className="flex flex-wrap gap-2 p-2 bg-gray-100/50 rounded-2xl">
         {timeRangeOptions.map((option) => (
@@ -428,26 +497,26 @@ const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           title="累计营收 (CNY)"
-          value={`¥${analytics.revenue_stats.total_amount.toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`}
+          value={`¥${(safeAnalytics.revenue_stats?.total_amount || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2 })}`}
           icon={DollarSign}
           colorClass="bg-yellow-400"
           trend={getTrendPercent() || undefined}
         />
         <StatCard
           title="活跃账号 / 总数"
-          value={`${stats.active_cookies} / ${stats.total_cookies}`}
+          value={`${safeStats.active_cookies ?? 0} / ${safeStats.total_cookies ?? 0}`}
           icon={Users}
           colorClass="bg-blue-500"
         />
         <StatCard
           title="订单数"
-          value={analytics.revenue_stats.total_orders.toLocaleString()}
+          value={(safeAnalytics.revenue_stats?.total_orders || 0).toLocaleString()}
           icon={ShoppingCart}
           colorClass="bg-orange-500"
         />
         <StatCard
           title="库存卡密余量"
-          value={stats.total_cards}
+          value={safeStats.total_cards ?? 0}
           icon={Package}
           colorClass="bg-purple-500"
         />
@@ -460,7 +529,7 @@ const Dashboard: React.FC = () => {
           <p className="text-sm text-gray-400 mt-1">最近7天的销售额走势</p>
         </div>
         <div className="h-[350px] w-full">
-          {chartData.length === 0 || analytics.revenue_stats.total_amount === 0 ? (
+          {chartData.length === 0 || (safeAnalytics.revenue_stats?.total_amount || 0) === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-gray-400">
               <ShoppingCart className="w-16 h-16 mb-4 opacity-20" />
               <p className="text-lg font-medium">暂无营收数据</p>
